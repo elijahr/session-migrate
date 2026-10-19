@@ -13,6 +13,10 @@ here. Native format compatibility is documented separately in
   flushed but directory-entry crash durability is left to the platform, and
   the file inherits the destination directory's ACL rather than receiving a
   POSIX mode-0600 equivalent, so confidentiality depends on that ACL.
+- Add version-aware OpenCode 2.0 public session transfer support, retaining the
+  legacy 1.17.20 adapter and native no-overwrite/dry-run controls. Preserve
+  portable tools, inline media, and completed compaction summaries, and account
+  for incomplete tools and provider-private state.
 
 ## 0.11.0 - 2026-09-11
 
