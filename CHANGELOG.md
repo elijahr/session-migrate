@@ -6,6 +6,8 @@ here. Native format compatibility is documented separately in
 
 ## Unreleased
 
+## 0.12.0 - 2026-10-19
+
 - Fix atomic writes on Windows in `write_private_atomic`: skip the Unix-only
   `os.fchmod` call and the directory `fsync` where the platform cannot
   perform them, and make temporary-file cleanup best-effort so a cleanup
@@ -17,6 +19,11 @@ here. Native format compatibility is documented separately in
   legacy 1.17.20 adapter and native no-overwrite/dry-run controls. Preserve
   portable tools, inline media, and completed compaction summaries, and account
   for incomplete tools and provider-private state.
+- Discover OpenCode v2 sessions by title and UUID alongside legacy sessions.
+  Validate native fields before projection, preserve ordered tool captions and
+  images, and report omitted structured-error fields without copying private
+  diagnostic response bodies.
+- Document contributor eligibility and the core-harness adoption policy.
 
 ## 0.11.0 - 2026-09-11
 
