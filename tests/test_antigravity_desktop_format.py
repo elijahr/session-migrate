@@ -10,6 +10,43 @@ from session_migrate.model import AgentFormat, Event, EventKind, Provenance, Rol
 
 TARGET_ID = "33333333-3333-4333-8333-333333333333"
 TRAJECTORY_ID = "44444444-4444-4444-8444-444444444444"
+FIXTURE = Path(__file__).parent / "fixtures" / "antigravity-desktop-2.18.1" / "basic.json"
+
+
+def fixture_database(tmp_path: Path) -> Path:
+    value = json.loads(FIXTURE.read_text())
+    rows = tuple(
+        antigravity._StepRow(
+            row["idx"],
+            row["step_type"],
+            row["status"],
+            None,
+            bytes.fromhex(row["step_payload_hex"]),
+        )
+        for row in value["steps"]
+    )
+    data = antigravity._build_database(
+        rows,
+        conversation_id=value["conversation_id"],
+        trajectory_id=value["trajectory_id"],
+        started_at=value["created_at"],
+        source=antigravity_desktop.SOURCE_DESKTOP,
+        project_id=antigravity_desktop.PROJECT_ID,
+    )
+    path = tmp_path / f"{value['conversation_id']}.db"
+    path.write_bytes(data)
+    return path
+
+
+def test_sanitized_native_source_fixture_loads_and_parses(tmp_path: Path) -> None:
+    path = fixture_database(tmp_path)
+    parsed = antigravity_desktop.parse(path)
+    assert parsed.session_id == "33333333-3333-4333-8333-333333333333"
+    assert parsed.trajectory_id == "44444444-4444-4444-8444-444444444444"
+    assert len(parsed.events) == 4
+    session = antigravity_desktop.parse_session(path)
+    assert session.source_format == AgentFormat.ANTIGRAVITY_DESKTOP
+    assert session.session_id == "33333333-3333-4333-8333-333333333333"
 
 
 def portable_session(tmp_path: Path) -> Session:
@@ -138,7 +175,14 @@ def test_desktop_parse_session_attributes(tmp_path: Path) -> None:
     assert len(session.events) == 4
 
 
-def test_desktop_installation_updates_summary_database(tmp_path: Path) -> None:
+def test_desktop_installation_updates_summary_database(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        antigravity_desktop,
+        "verify_pinned_desktop",
+        lambda *args, **kwargs: Path("language_server"),
+    )
     source = portable_session(tmp_path)
     data, _ = antigravity_desktop.serialize(
         source,
@@ -202,6 +246,49 @@ def test_desktop_installation_updates_summary_database(tmp_path: Path) -> None:
             target_home=target_home,
             dry_run=False,
         )
+
+
+def test_desktop_installation_requires_binary_verification_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = portable_session(tmp_path)
+    data, _ = antigravity_desktop.serialize(
+        source,
+        session_id=TARGET_ID,
+        trajectory_id=TRAJECTORY_ID,
+        cwd=tmp_path,
+        timestamp="2026-08-20T12:00:00Z",
+    )
+    target_home = tmp_path / "antigravity_unverified"
+
+    def fail_verification(*args, **kwargs):
+        raise SessionMigrateError("Mocked binary verification failure")
+
+    monkeypatch.setattr(antigravity_desktop, "verify_pinned_desktop", fail_verification)
+
+    # By default, verify_binary=True, so installation must fail
+    with pytest.raises(SessionMigrateError, match="Mocked binary verification failure"):
+        antigravity_desktop.install_database(
+            data,
+            session_id=TARGET_ID,
+            cwd=tmp_path,
+            timestamp="2026-08-20T12:00:00Z",
+            title="Unverified Desktop Session",
+            target_home=target_home,
+        )
+
+    # With explicit verify_binary=False bypass, installation succeeds
+    installed = antigravity_desktop.install_database(
+        data,
+        session_id=TARGET_ID,
+        cwd=tmp_path,
+        timestamp="2026-08-20T12:00:00Z",
+        title="Unverified Desktop Session",
+        target_home=target_home,
+        verify_binary=False,
+    )
+    assert installed.conversation_path.is_file()
+    assert installed.summaries_path.is_file()
 
 
 def test_desktop_and_cli_databases_do_not_falsely_detect_each_other(tmp_path: Path) -> None:
@@ -278,7 +365,15 @@ def test_format_detection_identifies_desktop(tmp_path: Path) -> None:
     assert detected == AgentFormat.ANTIGRAVITY_DESKTOP
 
 
-def test_conversion_pipeline_cli_to_desktop_and_back(tmp_path: Path) -> None:
+def test_conversion_pipeline_cli_to_desktop_and_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(antigravity, "verify_pinned_cli", lambda *args, **kwargs: Path("agy"))
+    monkeypatch.setattr(
+        antigravity_desktop,
+        "verify_pinned_desktop",
+        lambda *args, **kwargs: Path("language_server"),
+    )
     from session_migrate.conversion import (
         ConversionOptions,
         convert_session,

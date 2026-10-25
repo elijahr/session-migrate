@@ -11,8 +11,6 @@ through a clean-room adapter pinned to the 2.18.1 release:
 | Windows x64 binary | `163,640,320` bytes, SHA-256 `1ed84e6a1d1e51064d80c9f382ab3a519eb2775cb91d552c63064a18cfdf3cf2` |
 | Conversation store | `<home>/.gemini/antigravity/conversations/<uuid>.db` |
 | Picker index | `<home>/.gemini/antigravity/conversation_summaries.db` (`PRAGMA user_version = 3`) |
-| Hub summary cache | `<home>/.gemini/antigravity/agyhub_summaries_proto.pb` |
-| UI project catalog | `<home>/.gemini/config/projects/<id>.json` + `app_storage.json` |
 
 This is deliberately not a claim of compatibility with unreleased or arbitrary
 Antigravity versions. Automatic installation checks executable digests and
@@ -73,17 +71,11 @@ both the SQLite row columns and the serialized `Step` blob.
 
 ### Sidebar discovery and project grouping
 
-Antigravity Desktop filters sidebar conversations strictly by active projects:
-
-1. **Active Projects List**: Tracked in `app_storage.json` under `projectsOrder`.
-   - macOS: `~/Library/Application Support/Antigravity/app_storage.json`
-   - Linux: `$XDG_CONFIG_HOME/Antigravity/app_storage.json` (or `~/.config/Antigravity`)
-   - Windows: `%APPDATA%\Antigravity\app_storage.json`
-2. **Project Configurations**: Stored in `~/.gemini/config/projects/<id>.json`,
-   defining `project_id`, workspace paths, and display labels.
-3. Unassociated conversations (`project_id = "outside-of-project"`) are not
-   grouped in the project tree; assigning a registered project ID ensures instant
-   sidebar visibility.
+Antigravity Desktop organizes sidebar conversations by active project. In the
+current implementation, `install_database` writes the authoritative SQLite
+conversation database and summary entry with `project_id = "outside-of-project"`.
+Project association and UI tree indexing are managed by the Desktop application
+upon launch.
 
 ## Protobuf subset and Hub cache
 
@@ -105,13 +97,13 @@ field `2` stores visible user text. Planner-response field `1` stores visible
 assistant text, field `6` stores a fresh message ID, and repeated field `7`
 stores tool calls.
 
-### Hub summary cache (`agyhub_summaries_proto.pb`)
+### Hub summary cache
 
-Antigravity Desktop caches summaries in `agyhub_summaries_proto.pb`. On startup,
-the native Go process reconciles SQLite records with this protobuf cache. If a
-conversation exists in SQLite but has no entry in the cache or `raw_summary`
-column, metadata fields reset to zero defaults (`0001-01-01`). The adapter
-synchronizes both stores during installation.
+Antigravity Desktop maintains an internal cache in `agyhub_summaries_proto.pb`.
+When started, the native Go process (`language_server`) reconciles SQLite
+conversation and summary records. `session-migrate` writes the authoritative
+SQLite conversation and `conversation_summaries.db` records; protobuf cache
+reconciliation occurs when the Desktop application starts.
 
 ## Conversion policy
 

@@ -16,19 +16,32 @@ TRAJECTORY_ID = "dddddddd-eeee-4fff-8000-111111111111"
 
 
 def exact_desktop_binary() -> Path:
-    import sys
+    env_bin = os.environ.get("SESSION_MIGRATE_ANTIGRAVITY_DESKTOP_BIN")
+    selected_in_ci = (
+        bool(env_bin) or os.environ.get("SESSION_MIGRATE_RUN_ANTIGRAVITY_DESKTOP_NATIVE") == "1"
+    )
 
-    if sys.platform != "darwin":
-        pytest.skip(
-            "Antigravity Desktop native language server test is currently pinned and verified "
-            "for macOS; Linux and Windows binary verification is pending"
-        )
-    binary = antigravity_desktop.default_language_server_path()
-    if not binary.is_file():
+    if env_bin:
+        candidate = Path(env_bin).expanduser().resolve()
+        if not candidate.is_file():
+            pytest.fail(
+                f"Configured SESSION_MIGRATE_ANTIGRAVITY_DESKTOP_BIN not found: {candidate}"
+            )
+        return antigravity_desktop.verify_pinned_desktop(candidate)
+
+    default_binary = antigravity_desktop.default_language_server_path()
+    if not default_binary.is_file():
+        if selected_in_ci:
+            pytest.fail(
+                f"Antigravity Desktop language_server not found at default path: {default_binary}"
+            )
         pytest.skip("Antigravity Desktop language_server is not installed on this machine")
+
     try:
-        return antigravity_desktop.verify_pinned_desktop(binary)
+        return antigravity_desktop.verify_pinned_desktop(default_binary)
     except Exception as exc:
+        if selected_in_ci:
+            pytest.fail(f"Antigravity Desktop binary verification failed: {exc}")
         pytest.skip(f"Antigravity Desktop binary verification failed: {exc}")
 
 
@@ -188,3 +201,35 @@ def test_native_desktop_language_server_loads_adapter_database(tmp_path: Path) -
             proc.wait(timeout=3)
         except subprocess.TimeoutExpired:
             proc.kill()
+
+
+def test_exact_client_gate_fails_when_selected_in_ci(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # 1. Nonexistent binary specified via env var must fail rather than skip
+    monkeypatch.setenv("SESSION_MIGRATE_ANTIGRAVITY_DESKTOP_BIN", str(tmp_path / "nonexistent"))
+    with pytest.raises(
+        pytest.fail.Exception, match="Configured SESSION_MIGRATE_ANTIGRAVITY_DESKTOP_BIN not found"
+    ):
+        exact_desktop_binary()
+
+    # 2. Mismatched binary specified via env var must fail rather than skip
+    fake_binary = tmp_path / "fake_language_server"
+    fake_binary.write_bytes(b"invalid binary content")
+    monkeypatch.setenv("SESSION_MIGRATE_ANTIGRAVITY_DESKTOP_BIN", str(fake_binary))
+    with pytest.raises(Exception) as exc_info:
+        exact_desktop_binary()
+    assert exc_info.type in {pytest.fail.Exception, antigravity_desktop.SessionMigrateError}
+
+    # 3. Selected in CI via RUN flag with missing binary must fail rather than skip
+    monkeypatch.delenv("SESSION_MIGRATE_ANTIGRAVITY_DESKTOP_BIN", raising=False)
+    monkeypatch.setenv("SESSION_MIGRATE_RUN_ANTIGRAVITY_DESKTOP_NATIVE", "1")
+    monkeypatch.setattr(
+        antigravity_desktop,
+        "default_language_server_path",
+        lambda *args, **kwargs: tmp_path / "missing",
+    )
+    with pytest.raises(
+        pytest.fail.Exception, match="Antigravity Desktop language_server not found"
+    ):
+        exact_desktop_binary()

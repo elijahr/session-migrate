@@ -491,10 +491,11 @@ def install_database(
     target_cli: Path | None = None,
     dry_run: bool = False,
     environ: Mapping[str, str] | None = None,
+    verify_binary: bool = True,
 ) -> InstalledAntigravitySession:
     """Install a validated conversation and its desktop summary without overwrite."""
     validate_native_bytes(data, session_id)
-    if target_cli is not None or os.environ.get("SESSION_MIGRATE_VERIFY_DESKTOP_BIN") == "1":
+    if verify_binary:
         verify_pinned_desktop(target_cli, environ=environ)
     root = _absolute_no_follow(target_home)
     conversation_path = root / session_relative_path(session_id)

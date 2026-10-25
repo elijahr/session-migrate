@@ -6,10 +6,10 @@ here. Native format compatibility is documented separately in
 
 ## Unreleased
 
-- Add first-class support for Antigravity Desktop (macOS/Electron) 2.18.1
-  with bidirectional conversion, SQLite schema adaptation, Hub Summaries
-  Protobuf cache synchronization (`agyhub_summaries_proto.pb`), project-scoped
-  sidebar discovery, and verified native Go language server integration.
+- Add first-class support for Antigravity Desktop (macOS, Linux, Windows) 2.18.1
+  with bidirectional conversion, SQLite schema adaptation, summary index
+  registration (`conversation_summaries.db`), and verified native Go language
+  server integration.
 - Document the clean-room Antigravity Desktop storage architecture, Protobuf
   wire formats, Connect-RPC interfaces, and collision invariants in
   `docs/antigravity-desktop-format.md`.
