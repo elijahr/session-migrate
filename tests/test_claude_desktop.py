@@ -135,7 +135,7 @@ def test_find_desktop_project_dir_matching_cwd(tmp_path: Path) -> None:
     assert selected == org1_proj1
 
 
-def test_find_desktop_project_dir_fallback_mtime(tmp_path: Path) -> None:
+def test_find_desktop_project_dir_no_guess_by_mtime(tmp_path: Path) -> None:
     sessions_dir = tmp_path / "claude-code-sessions"
     org1_proj1 = sessions_dir / "org1" / "proj1"
     org1_proj1.mkdir(parents=True)
@@ -150,10 +150,13 @@ def test_find_desktop_project_dir_fallback_mtime(tmp_path: Path) -> None:
     p2.write_text(json.dumps({"cwd": "/recent/repo"}))
     os.utime(p2, (time.time(), time.time()))
 
-    # Looking for a cwd that doesn't match any existing pointer
+    # Looking for a cwd that doesn't match any existing pointer:
+    # do NOT guess the account/organization from the newest pointer!
     unmatched_cwd = tmp_path / "unmatched"
     selected = claude.find_desktop_project_dir(sessions_dir, unmatched_cwd)
-    assert selected == org2_proj2
+    assert selected == (
+        sessions_dir / claude.DEFAULT_DESKTOP_ORG_ID / claude.DEFAULT_DESKTOP_PROJECT_ID
+    )
 
 
 def test_find_desktop_project_dir_empty_initializes_defaults(tmp_path: Path) -> None:
@@ -161,11 +164,7 @@ def test_find_desktop_project_dir_empty_initializes_defaults(tmp_path: Path) -> 
     sessions_dir.mkdir()
 
     selected = claude.find_desktop_project_dir(sessions_dir, tmp_path / "any")
-    expected = (
-        sessions_dir
-        / claude.DEFAULT_DESKTOP_ORG_ID
-        / claude.DEFAULT_DESKTOP_PROJECT_ID
-    )
+    expected = sessions_dir / claude.DEFAULT_DESKTOP_ORG_ID / claude.DEFAULT_DESKTOP_PROJECT_ID
     assert selected == expected
 
 
@@ -340,3 +339,39 @@ def test_cli_import_to_claude_with_desktop_flag(tmp_path: Path) -> None:
     assert pointer.is_file()
     data = json.loads(pointer.read_text(encoding="utf-8"))
     assert data["cliSessionId"] == target_sid
+
+
+def test_cli_import_to_claude_no_desktop_option_leaves_global_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_global = tmp_path / "global_home"
+    global_desktop = fake_global / ".config" / "Claude" / "claude-code-sessions"
+    global_desktop.mkdir(parents=True)
+
+    monkeypatch.setenv("HOME", str(fake_global))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(fake_global / ".config"))
+    monkeypatch.delenv("CLAUDE_DESKTOP_CONFIG_DIR", raising=False)
+
+    target_home = tmp_path / "isolated_claude_home"
+    target_sid = "99999999-9999-4999-8999-999999999999"
+
+    code = main(
+        [
+            "import",
+            str(SOURCE_CLAUDE_FILE),
+            "--to",
+            "claude",
+            "--home",
+            str(target_home),
+            "--session-id",
+            target_sid,
+        ]
+    )
+    assert code == 0
+
+    # Imported transcript exists under target_home
+    manifest = target_home / "session-migrate" / "manifests" / f"{target_sid}.json"
+    assert manifest.is_file()
+
+    # Crucial: NO pointer was created in the global Desktop tree
+    assert list(global_desktop.rglob("*.json")) == []

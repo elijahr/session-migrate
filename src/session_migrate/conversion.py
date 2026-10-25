@@ -820,11 +820,12 @@ def install_claude_artifact(
         raise SessionMigrateError("Claude installation requires a Claude artifact")
     output_path, manifest_path = target_import_paths(artifact, target_home)
     env = os.environ if environ is None else environ
-    sessions_dir = claude.resolve_desktop_sessions_dir(
-        desktop_dir=desktop_dir,
-        environ=env,
-        target_home=target_home,
-    )
+    sessions_dir = None
+    if desktop_dir is not None or env.get("CLAUDE_DESKTOP_CONFIG_DIR"):
+        sessions_dir = claude.resolve_desktop_sessions_dir(
+            desktop_dir=desktop_dir,
+            environ=env,
+        )
     pointer_path: Path | None = None
     if sessions_dir is not None:
         pointer_path = claude.desktop_pointer_path(sessions_dir, artifact.session_id, artifact.cwd)

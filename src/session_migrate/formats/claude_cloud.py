@@ -54,9 +54,7 @@ def is_claude_cloud_document(data: Any) -> bool:
             and ("uuid" in first or "name" in first or "created_at" in first)
         )
     if isinstance(data, dict):
-        if "chat_messages" in data and (
-            "uuid" in data or "name" in data or "created_at" in data
-        ):
+        if "chat_messages" in data and ("uuid" in data or "name" in data or "created_at" in data):
             return True
         convs = data.get("conversations")
         if isinstance(convs, list) and convs:
@@ -130,6 +128,11 @@ def parse_session(path: Path, session_id: str | None = None) -> Session:
                 f"no Claude Cloud conversation found for UUID {session_id} in {path}"
             )
     else:
+        if len(conversations) > 1:
+            raise SessionMigrateError(
+                f"Claude Cloud export contains {len(conversations)} conversations; "
+                f"ambiguous file conversion without a session ID in {path}"
+            )
         selected = conversations[0]
 
     conv_uuid = string(selected.get("uuid")) or string(selected.get("id"))
@@ -164,9 +167,7 @@ def parse_session(path: Path, session_id: str | None = None) -> Session:
             role = Role.SYSTEM
         else:
             role = (
-                Role.USER
-                if "human" in sender_lower or "user" in sender_lower
-                else Role.ASSISTANT
+                Role.USER if "human" in sender_lower or "user" in sender_lower else Role.ASSISTANT
             )
 
         if role == Role.ASSISTANT and model is None and msg.get("model"):

@@ -135,25 +135,12 @@ def test_load_conversations_and_listing(tmp_path: Path) -> None:
     assert summaries[1]["session_id"] == CONV_UUID_2
 
 
-def test_parse_session_default_first(tmp_path: Path) -> None:
+def test_parse_session_rejects_ambiguous_export(tmp_path: Path) -> None:
     export_file = tmp_path / "conversations.json"
     export_file.write_text(json.dumps(_sample_cloud_export()))
 
-    session = claude_cloud.parse_session(export_file)
-    assert session.source_format == AgentFormat.CLAUDE_CLOUD
-    assert session.session_id == CONV_UUID_1
-    assert session.title == "First Cloud Conversation"
-    assert session.model == "claude-3-5-sonnet-20241022"
-    assert session.started_at == "2026-08-17T10:00:00Z"
-    assert len(session.events) == 2
-
-    assert session.events[0].kind == EventKind.MESSAGE
-    assert session.events[0].role == Role.USER
-    assert session.events[0].text == "Can you explain recursion?"
-
-    assert session.events[1].kind == EventKind.MESSAGE
-    assert session.events[1].role == Role.ASSISTANT
-    assert session.events[1].text == "Recursion is when a function calls itself."
+    with pytest.raises(SessionMigrateError, match="ambiguous file conversion without a session ID"):
+        claude_cloud.parse_session(export_file)
 
 
 def test_parse_session_by_uuid_and_attachments(tmp_path: Path) -> None:
@@ -213,7 +200,14 @@ def test_load_session_and_inspection(tmp_path: Path) -> None:
     )
     assert session.session_id == CONV_UUID_2
 
-    inspection = inspect_session(export_file)
+    # Multiple conversations without session_id raises ambiguous conversion error
+    with pytest.raises(SessionMigrateError, match="ambiguous file conversion without a session ID"):
+        inspect_session(export_file)
+
+    # Single conversation inspects cleanly
+    single_file = tmp_path / "single.json"
+    single_file.write_text(json.dumps(_sample_cloud_export()[0]))
+    inspection = inspect_session(single_file)
     assert inspection.format == AgentFormat.CLAUDE_CLOUD.value
     assert inspection.session_id == CONV_UUID_1
     assert inspection.records == 2
@@ -225,13 +219,22 @@ def test_discovery_and_catalog(tmp_path: Path) -> None:
 
     located = locate_session(AgentFormat.CLAUDE_CLOUD, CONV_UUID_1, tmp_path)
     assert located.resolve() == export_file.resolve()
+    located_2 = locate_session(AgentFormat.CLAUDE_CLOUD, CONV_UUID_2, tmp_path)
+    assert located_2.resolve() == export_file.resolve()
 
     catalog = Catalog(tmp_path / "catalog.sqlite3")
     result = catalog.refresh(claude_cloud_roots=[tmp_path], include_auto=False)
-    assert result.files_seen >= 1
-    sessions = catalog.list_sessions(query="First Cloud Conversation")
-    assert len(sessions) >= 1
-    assert sessions[0].session_id == CONV_UUID_1
+    assert result.root_errors == 0
+    assert result.files_seen == 2
+
+    # Both conversations indexed with their native titles
+    sessions_1 = catalog.list_sessions(query="First Cloud Conversation")
+    assert len(sessions_1) == 1
+    assert sessions_1[0].session_id == CONV_UUID_1
+
+    sessions_2 = catalog.list_sessions(query="Second Cloud Conversation")
+    assert len(sessions_2) == 1
+    assert sessions_2[0].session_id == CONV_UUID_2
 
 
 def test_convert_claude_cloud_to_codex_and_claude(tmp_path: Path) -> None:
@@ -269,23 +272,48 @@ def test_cli_inspect_and_convert(tmp_path: Path, capsys: pytest.CaptureFixture[s
     export_file = tmp_path / "conversations.json"
     export_file.write_text(json.dumps(_sample_cloud_export()))
 
-    # CLI inspect
-    code = main(["inspect", str(export_file)])
+    single_file = tmp_path / "single.json"
+    single_file.write_text(json.dumps(_sample_cloud_export()[0]))
+
+    # CLI inspect on ambiguous multi-session export fails with code 2
+    code_ambiguous = main(["inspect", str(export_file)])
+    assert code_ambiguous == 2
+
+    # CLI inspect on single conversation succeeds
+    code = main(["inspect", str(single_file)])
     assert code == 0
     captured = capsys.readouterr()
     assert "claude-cloud" in captured.out
     assert CONV_UUID_1 in captured.out
 
     # CLI inspect with --from alias
-    code_from = main(["inspect", str(export_file), "--from", "claude-cloud"])
+    code_from = main(["inspect", str(single_file), "--from", "claude-cloud"])
     assert code_from == 0
 
-    # CLI convert
+    # Converting ambiguous multi-conversation file fails with code 2
+    out_ambiguous = tmp_path / "out_ambiguous.jsonl"
+    convert_ambiguous = main(
+        [
+            "convert",
+            str(export_file),
+            "--from",
+            "claude-cloud",
+            "--to",
+            "codex",
+            "--output",
+            str(out_ambiguous),
+            "--cwd",
+            str(tmp_path),
+        ]
+    )
+    assert convert_ambiguous == 2
+
+    # CLI convert on single conversation succeeds
     out_file = tmp_path / "converted.jsonl"
     convert_code = main(
         [
             "convert",
-            str(export_file),
+            str(single_file),
             "--from",
             "claude-cloud",
             "--to",
@@ -301,3 +329,119 @@ def test_cli_inspect_and_convert(tmp_path: Path, capsys: pytest.CaptureFixture[s
     assert convert_code == 0
     assert out_file.is_file()
     assert (tmp_path / "converted.jsonl.session-migrate.json").is_file()
+
+
+def test_cli_transfer_second_uuid_by_id(tmp_path: Path) -> None:
+    export_file = tmp_path / "conversations.json"
+    export_file.write_text(json.dumps(_sample_cloud_export()))
+    codex_home = tmp_path / "codex_home"
+
+    # Transfer second UUID directly using --source-home pointing to conversations.json
+    code = main(
+        [
+            "transfer",
+            CONV_UUID_2,
+            "--from",
+            "claude-cloud",
+            "--source-home",
+            str(export_file),
+            "--to",
+            "codex",
+            "--home",
+            str(codex_home),
+            "--cwd",
+            str(tmp_path),
+        ]
+    )
+    assert code == 0
+
+    # Ensure Codex transcript was created
+    codex_files = list(codex_home.rglob("*.jsonl"))
+    assert len(codex_files) == 1
+    content = codex_files[0].read_text(encoding="utf-8")
+    assert "col1,col2" in content
+    assert "diagram.png" in content
+
+
+def test_catalog_file_root_indexes_all_conversations(tmp_path: Path) -> None:
+    export_file = tmp_path / "conversations.json"
+    export_file.write_text(json.dumps(_sample_cloud_export()))
+
+    catalog = Catalog(tmp_path / "catalog.sqlite3")
+    # Add root as the file itself
+    catalog.add_root(AgentFormat.CLAUDE_CLOUD, export_file)
+    result = catalog.refresh(include_auto=False)
+
+    assert result.root_errors == 0
+    assert result.files_seen == 2
+    assert result.scanned == 2
+
+    # Check both conversations are registered in catalog
+    all_sessions = catalog.list_sessions(agent_format=AgentFormat.CLAUDE_CLOUD)
+    assert len(all_sessions) == 2
+    session_ids = {s.session_id for s in all_sessions}
+    assert session_ids == {CONV_UUID_1, CONV_UUID_2}
+
+    # Verify session_source_for_transfer returns the file path and exact conversation ID
+    entry_2 = next(s for s in all_sessions if s.session_id == CONV_UUID_2)
+    source = catalog.session_source_for_transfer(entry_2.catalog_id)
+    assert source.format == AgentFormat.CLAUDE_CLOUD
+    assert source.path == export_file.resolve()
+    assert source.session_id == CONV_UUID_2
+
+
+def test_catalog_transfer_by_title_and_by_catalog_id(tmp_path: Path) -> None:
+    export_file = tmp_path / "conversations.json"
+    export_file.write_text(json.dumps(_sample_cloud_export()))
+    catalog_path = tmp_path / "catalog.sqlite3"
+
+    catalog = Catalog(catalog_path)
+    catalog.add_root(AgentFormat.CLAUDE_CLOUD, tmp_path)
+    catalog.refresh(include_auto=False)
+
+    codex_home_title = tmp_path / "codex_title"
+    # Transfer by exact title
+    code_title = main(
+        [
+            "--catalog",
+            str(catalog_path),
+            "transfer",
+            "--title",
+            "Second Cloud Conversation with Image and Attachment",
+            "--to",
+            "codex",
+            "--home",
+            str(codex_home_title),
+            "--cwd",
+            str(tmp_path),
+        ]
+    )
+    assert code_title == 0
+    codex_files = list(codex_home_title.rglob("*.jsonl"))
+    assert len(codex_files) == 1
+    content = codex_files[0].read_text(encoding="utf-8")
+    assert "col1,col2" in content
+
+    # Transfer by catalog ID
+    session_1 = catalog.list_sessions(query="First Cloud Conversation")[0]
+    codex_home_cat = tmp_path / "codex_catalog_id"
+    code_cat = main(
+        [
+            "--catalog",
+            str(catalog_path),
+            "transfer",
+            "--catalog-id",
+            session_1.catalog_id,
+            "--to",
+            "codex",
+            "--home",
+            str(codex_home_cat),
+            "--cwd",
+            str(tmp_path),
+        ]
+    )
+    assert code_cat == 0
+    codex_files_cat = list(codex_home_cat.rglob("*.jsonl"))
+    assert len(codex_files_cat) == 1
+    content_cat = codex_files_cat[0].read_text(encoding="utf-8")
+    assert "Can you explain recursion?" in content_cat

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import sys
 import uuid
 from collections import Counter, deque
 from collections.abc import Iterable, Mapping
@@ -695,106 +694,59 @@ def resolve_desktop_sessions_dir(
 ) -> Path | None:
     """Resolve the active Claude Desktop claude-code-sessions directory.
 
-    Checks:
+    Requires an explicit Desktop destination:
     1. Explicit desktop_dir argument.
     2. CLAUDE_DESKTOP_CONFIG_DIR in environ.
-    3. claude-code-sessions subdirectory inside target_home (if provided).
-    4. Default OS paths (if present on disk):
-       - macOS: ~/Library/Application Support/Claude/claude-code-sessions
-       - Linux: $XDG_CONFIG_HOME/Claude/claude-code-sessions or
-         ~/.config/Claude/claude-code-sessions
-       - Windows: %APPDATA%/Claude/claude-code-sessions
+    3. Explicit claude-code-sessions directory inside target_home (if provided).
+
+    Does not auto-discover global Desktop paths.
     """
     env = os.environ if environ is None else environ
     if desktop_dir is not None:
         p = Path(desktop_dir).expanduser().resolve()
-        return p if p.name == "claude-code-sessions" else p / "claude-code-sessions"
+        return (
+            p
+            if p.name == "claude-code-sessions" or "claude-code-sessions" in p.parts
+            else p / "claude-code-sessions"
+        )
 
     env_dir = env.get("CLAUDE_DESKTOP_CONFIG_DIR")
     if env_dir:
         p = Path(env_dir).expanduser().resolve()
-        return p if p.name == "claude-code-sessions" else p / "claude-code-sessions"
+        return (
+            p
+            if p.name == "claude-code-sessions" or "claude-code-sessions" in p.parts
+            else p / "claude-code-sessions"
+        )
 
     if target_home is not None:
         candidate = target_home.expanduser().resolve() / "claude-code-sessions"
         if candidate.is_dir():
             return candidate
 
-    if sys.platform == "darwin":
-        default_path = (
-            Path.home() / "Library" / "Application Support" / "Claude" / "claude-code-sessions"
-        )
-    elif sys.platform == "win32":
-        app_data = env.get("APPDATA")
-        default_path = (
-            (Path(app_data).expanduser() / "Claude" / "claude-code-sessions")
-            if app_data
-            else Path.home() / "AppData" / "Roaming" / "Claude" / "claude-code-sessions"
-        )
-    else:
-        xdg_config = env.get("XDG_CONFIG_HOME")
-        default_path = (
-            (Path(xdg_config).expanduser() / "Claude" / "claude-code-sessions")
-            if xdg_config
-            else Path.home() / ".config" / "Claude" / "claude-code-sessions"
-        )
-
-    if default_path.is_dir():
-        return default_path.resolve()
     return None
 
 
 def find_desktop_project_dir(sessions_dir: Path, session_cwd: Path | None = None) -> Path:
-    """Find the matching or primary <org_id>/<project_id> directory under claude-code-sessions."""
-    pairs: list[tuple[Path, Path]] = []
-    matching_pair: tuple[Path, Path] | None = None
+    """Find the matching or default <org_id>/<project_id> directory under claude-code-sessions."""
     norm_cwd = str(session_cwd.resolve()) if session_cwd else None
 
     if sessions_dir.is_dir():
         for org in sorted(sessions_dir.iterdir()):
             if org.is_dir() and not org.name.startswith("."):
                 for proj in sorted(org.iterdir()):
-                    if proj.is_dir() and not proj.name.startswith("."):
-                        pairs.append((org, proj))
-                        if matching_pair is None and norm_cwd:
-                            for pointer_file in proj.glob("local_*.json"):
-                                try:
-                                    data = json.loads(pointer_file.read_text(encoding="utf-8"))
-                                    p_cwd = data.get("cwd") or data.get("originCwd")
-                                    if p_cwd and (
-                                        p_cwd == norm_cwd or str(Path(p_cwd).resolve()) == norm_cwd
-                                    ):
-                                        matching_pair = (org, proj)
-                                        break
-                                except Exception:
-                                    continue
+                    if proj.is_dir() and not proj.name.startswith(".") and norm_cwd:
+                        for pointer_file in proj.glob("local_*.json"):
+                            try:
+                                data = json.loads(pointer_file.read_text(encoding="utf-8"))
+                                p_cwd = data.get("cwd") or data.get("originCwd")
+                                if p_cwd and (
+                                    p_cwd == norm_cwd or str(Path(p_cwd).resolve()) == norm_cwd
+                                ):
+                                    return proj
+                            except Exception:
+                                continue
 
-    if matching_pair is not None:
-        return matching_pair[1]
-
-    if pairs:
-        def pair_key(pair: tuple[Path, Path]) -> tuple[float, str, str]:
-            org, proj = pair
-            latest_mtime = 0.0
-            for f in proj.glob("local_*.json"):
-                try:
-                    m = f.stat().st_mtime
-                    if m > latest_mtime:
-                        latest_mtime = m
-                except OSError:
-                    pass
-            return (latest_mtime, org.name, proj.name)
-
-        sorted_pairs = sorted(pairs, key=pair_key, reverse=True)
-        return sorted_pairs[0][1]
-
-    orgs = (
-        [p for p in sorted(sessions_dir.iterdir()) if p.is_dir() and not p.name.startswith(".")]
-        if sessions_dir.is_dir()
-        else []
-    )
-    if orgs:
-        return orgs[0] / DEFAULT_DESKTOP_PROJECT_ID
     return sessions_dir / DEFAULT_DESKTOP_ORG_ID / DEFAULT_DESKTOP_PROJECT_ID
 
 

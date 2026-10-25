@@ -529,7 +529,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                         )
                     else:
                         assert source_path is not None
-                        session = load_session(source_path, source_format)
+                        session = load_session(
+                            source_path,
+                            source_format,
+                            session_id=requested_source_id,
+                        )
                 if not session.session_id:
                     raise SessionMigrateError(
                         "discovered transcript has no native session ID metadata"
