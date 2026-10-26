@@ -6,6 +6,8 @@ here. Native format compatibility is documented separately in
 
 ## Unreleased
 
+## Unreleased
+
 - Add first-class support for Antigravity Desktop (macOS, Linux, Windows) 2.18.1
   with bidirectional conversion, SQLite schema adaptation, summary index
   registration (`conversation_summaries.db`), and verified native Go language
@@ -13,6 +15,25 @@ here. Native format compatibility is documented separately in
 - Document the clean-room Antigravity Desktop storage architecture, Protobuf
   wire formats, Connect-RPC interfaces, and collision invariants in
   `docs/antigravity-desktop-format.md`.
+
+## 0.12.0 - 2026-10-19
+
+- Fix atomic writes on Windows in `write_private_atomic`: skip the Unix-only
+  `os.fchmod` call and the directory `fsync` where the platform cannot
+  perform them, and make temporary-file cleanup best-effort so a cleanup
+  failure cannot mask the original error. On Windows this means file data is
+  flushed but directory-entry crash durability is left to the platform, and
+  the file inherits the destination directory's ACL rather than receiving a
+  POSIX mode-0600 equivalent, so confidentiality depends on that ACL.
+- Add version-aware OpenCode 2.0 public session transfer support, retaining the
+  legacy 1.17.20 adapter and native no-overwrite/dry-run controls. Preserve
+  portable tools, inline media, and completed compaction summaries, and account
+  for incomplete tools and provider-private state.
+- Discover OpenCode v2 sessions by title and UUID alongside legacy sessions.
+  Validate native fields before projection, preserve ordered tool captions and
+  images, and report omitted structured-error fields without copying private
+  diagnostic response bodies.
+- Document contributor eligibility and the core-harness adoption policy.
 
 ## 0.11.0 - 2026-09-11
 
