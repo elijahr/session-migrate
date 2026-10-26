@@ -1329,6 +1329,46 @@ home paths, or account identifiers. The preceding merged code tree passed all
 22 GitHub Actions jobs on Python 3.11/3.12/3.13, the website, and every pinned
 native client before the release metadata was prepared.
 
+### v0.12.0 release gates
+
+The 2026-10-19 combined integration of adversarially approved PRs #8 and #17
+passed **1,755 tests**, with **47 explicit native/environment-dependent skips**,
+in an isolated Linux Python 3.11.14 environment. Exact OpenCode 2.0.23, legacy
+OpenCode 1.17.20, Kilo 7.5.0, and Grok 1.0.5 clients were supplied; model
+continuations used deterministic localhost providers without account credentials.
+The default native corpus continued to exercise all **324 ordered routes**.
+
+The retained independent review checks passed **82 cases** covering Windows
+branch mechanics, POSIX publication, no-clobber races, ordered text/image payloads,
+error-loss privacy, malformed native fields, resource caps, public CLI import,
+collisions, cleanup, and cold native continuation. Eight exploratory exact-empty-
+block assertions were deselected in favor of eight explicit target-specific
+retention/normalization contracts included in that passing case set. Two obsolete
+diagnostic probes still expected malformed v2 fields to be accepted; their
+failures are not counted as successes. The unchanged minimized rejection tests
+verify the corrected contract.
+
+Ruff lint/formatting and all **12 contributor-policy unit tests** passed. The
+pinned network-disabled Docker probe loaded and appended to both Claude and Codex
+sessions while preserving each imported prefix. Website lint, production build,
+and all **seven rendered-page tests** passed; the production dependency audit
+reported zero known vulnerabilities. An initial website test failure came from
+mounting only the website directory and hiding the repository-level canonical
+files; it passed after correcting the isolated mount without changing tests.
+
+Both PR heads retained their exact prior approvals and passing CI. The sole
+integration conflict was in the changelog, resolved by retaining both entries.
+Publication requires a fresh passing final-main CI run on Python 3.11–3.13,
+the website, and all **19 exact-client variants**, including OpenCode v2.
+Distribution checks additionally require isolated wheel entry points, a source
+rebuild, artifact-content/privacy inspection, and verification of the published
+PyPI hashes and a fresh public installation.
+
+This release does not claim native Windows certification, compatibility with
+every future/custom OpenCode 2.0 build, or real-account migration coverage.
+Windows files inherit their destination directory's ACL; skipping directory
+fsync does not promise directory-entry crash durability.
+
 ## Known boundaries
 
 - Complete root Codex paginated history is supported from canonical completed
